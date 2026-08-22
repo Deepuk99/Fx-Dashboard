@@ -1,9 +1,8 @@
 import csv
 import io
-from datetime import datetime
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import requests
@@ -13,49 +12,84 @@ import streamlit as st
 # CONFIG
 # =========================================================
 CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS17geJblGtzfcq5AYKaaRakdMtFpuHKaE_H-vg1BndiU1qV02hkH5BZiPA1qpbZExCH_nh5X9jUi_W/pub?gid=438761626&single=true&output=csv"
+APP_TITLE = "dpkFXdashboard"
 
-st.set_page_config(
-    page_title="FX Performance Terminal",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title=APP_TITLE, page_icon="📈", layout="wide")
 
 # =========================================================
-# DARK TRADING-TERMINAL THEME
+# THEME (custom light/dark toggle — overrides Streamlit's own
+# theme menu so the WHOLE app switches consistently, not just
+# native widgets)
 # =========================================================
-st.markdown("""
+THEMES = {
+    "Dark": dict(
+        bg="#0a0e14", card_bg="#12161f", card_bg2="#0d1017", border="#1f2733",
+        text_primary="#e5e7eb", text_secondary="#8b93a3", ticker_bg="#0d1017",
+        green="#22c55e", red="#ef4444", neutral="#e5e7eb",
+        plotly_template="plotly_dark", plot_bg="#0a0e14",
+    ),
+    "Light": dict(
+        bg="#f5f6f8", card_bg="#ffffff", card_bg2="#ffffff", border="#e2e8f0",
+        text_primary="#111827", text_secondary="#6b7280", ticker_bg="#ffffff",
+        green="#16a34a", red="#dc2626", neutral="#111827",
+        plotly_template="plotly_white", plot_bg="#ffffff",
+    ),
+}
+
+if "theme" not in st.session_state:
+    st.session_state.theme = "Dark"
+
+T = THEMES[st.session_state.theme]
+
+st.markdown(f"""
 <style>
-    .stApp { background-color: #0a0e14; color: #d1d5db; }
-    section[data-testid="stSidebar"] { background-color: #10141c; border-right: 1px solid #1f2733; }
-    h1, h2, h3 { color: #e5e7eb !important; font-family: 'Courier New', monospace; }
-    .stat-card {
-        background: linear-gradient(145deg, #12161f, #0d1017);
-        border: 1px solid #1f2733;
+    html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"],
+    [data-testid="stToolbar"], .main, .block-container {{
+        background-color: {T['bg']} !important;
+        color: {T['text_primary']} !important;
+    }}
+    h1, h2, h3, h4, p, span, label, div {{ color: {T['text_primary']}; }}
+    h1, h2, h3 {{ font-family: 'Courier New', monospace; }}
+    .stat-card {{
+        background: {T['card_bg']};
+        border: 1px solid {T['border']};
         border-radius: 10px;
         padding: 16px 18px;
         text-align: left;
-    }
-    .stat-label { color: #8b93a3; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
-    .stat-value { font-size: 26px; font-weight: 700; font-family: 'Courier New', monospace; }
-    .green { color: #22c55e; }
-    .red { color: #ef4444; }
-    .neutral { color: #e5e7eb; }
-    .ticker-wrap {
-        width: 100%; overflow: hidden; background: #0d1017;
-        border-top: 1px solid #1f2733; border-bottom: 1px solid #1f2733;
+        margin-bottom: 10px;
+    }}
+    .stat-label {{ color: {T['text_secondary']}; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }}
+    .stat-value {{ font-size: 26px; font-weight: 700; font-family: 'Courier New', monospace; }}
+    .green {{ color: {T['green']}; }}
+    .red {{ color: {T['red']}; }}
+    .neutral {{ color: {T['neutral']}; }}
+    .ticker-wrap {{
+        width: 100%; overflow: hidden; background: {T['ticker_bg']};
+        border-top: 1px solid {T['border']}; border-bottom: 1px solid {T['border']};
         padding: 8px 0; margin-bottom: 18px;
-    }
-    .ticker-move {
+    }}
+    .ticker-move {{
         display: inline-block; white-space: nowrap;
-        animation: ticker 40s linear infinite;
+        animation: ticker 140s linear infinite;
         font-family: 'Courier New', monospace; font-size: 14px;
-    }
-    @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-    .ticker-item { display: inline-block; padding: 0 24px; }
-    div[data-testid="stDataFrame"] { border: 1px solid #1f2733; border-radius: 8px; }
+    }}
+    .ticker-wrap:hover .ticker-move {{ animation-play-state: paused; }}
+    @keyframes ticker {{ 0% {{ transform: translateX(0); }} 100% {{ transform: translateX(-50%); }} }}
+    .ticker-item {{ display: inline-block; padding: 0 24px; }}
+    div[data-testid="stDataFrame"] {{ border: 1px solid {T['border']}; border-radius: 8px; }}
+    div[data-testid="stExpander"] {{ background: {T['card_bg']}; border: 1px solid {T['border']}; border-radius: 10px; }}
 </style>
 """, unsafe_allow_html=True)
+
+
+def themed(fig):
+    fig.update_layout(
+        template=T['plotly_template'],
+        paper_bgcolor=T['plot_bg'], plot_bgcolor=T['plot_bg'],
+        font=dict(color=T['text_primary']),
+    )
+    return fig
+
 
 # =========================================================
 # DATA LOADING & PARSING
@@ -103,12 +137,10 @@ def load_data(url: str) -> pd.DataFrame:
     df = pd.DataFrame(data_rows, columns=EXPECTED_COLS)
     df = df.drop(columns=['Blank'])
 
-    # Keep only real trade rows: must have a dd/mm/yyyy date and a Won/Loss result
     df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y', errors='coerce')
     df = df[df['Date'].notna()]
     df = df[df['W/L'].isin(['Won', 'Loss'])]
 
-    # Numeric conversions
     for col in ['Pip', 'Lot', 'Swap', 'Charges', 'P&L', 'Day Total', 'Actl Pft %',
                 'TP', 'SL', 'RR', 'R Multiple']:
         df[col] = clean_numeric(df[col])
@@ -119,14 +151,10 @@ def load_data(url: str) -> pd.DataFrame:
     df['Session'] = df['Session'].fillna('Unknown').replace('', 'Unknown')
     df['Pair'] = df['Pair'].fillna('Unknown').replace('', 'Unknown')
     df['Action'] = df['Action'].fillna('Unknown').replace('', 'Unknown')
+    df['WK'] = df['WK'].fillna('N/A').replace('', 'N/A')
     df['Month'] = df['Date'].dt.to_period('M').dt.to_timestamp()
 
     df = df.sort_values('Date').reset_index(drop=True)
-    df['Trade No'] = range(1, len(df) + 1)
-    df['Cum P&L'] = df['P&L'].fillna(0).cumsum()
-    running_max = df['Cum P&L'].cummax()
-    df['Drawdown'] = df['Cum P&L'] - running_max
-
     return df
 
 
@@ -141,42 +169,58 @@ if df_raw.empty:
     st.stop()
 
 # =========================================================
-# SIDEBAR FILTERS
+# HEADER (title + theme toggle)
 # =========================================================
-st.sidebar.markdown("## ⚙️ Filters")
+h1, h2 = st.columns([5, 1])
+with h1:
+    st.markdown(f"# 📈 {APP_TITLE}")
+with h2:
+    choice = st.radio("Theme", ["Dark", "Light"], horizontal=True,
+                       index=0 if st.session_state.theme == "Dark" else 1,
+                       label_visibility="collapsed")
+    if choice != st.session_state.theme:
+        st.session_state.theme = choice
+        st.rerun()
 
-min_date, max_date = df_raw['Date'].min().date(), df_raw['Date'].max().date()
-date_range = st.sidebar.date_input(
-    "Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date
-)
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    start_date, end_date = date_range
-else:
-    start_date, end_date = min_date, max_date
+# =========================================================
+# FILTERS — now inline in the dashboard, not the sidebar
+# =========================================================
+with st.expander("⚙️ Filters", expanded=True):
+    min_date, max_date = df_raw['Date'].min().date(), df_raw['Date'].max().date()
 
-pairs = sorted(df_raw['Pair'].unique())
-sel_pairs = st.sidebar.multiselect("Currency Pair", pairs, default=pairs)
+    fc1, fc2 = st.columns([1, 3])
+    with fc1:
+        date_range = st.date_input("Date range", value=(min_date, max_date),
+                                    min_value=min_date, max_value=max_date)
+    with fc2:
+        if st.button("🔄 Force refresh now"):
+            st.cache_data.clear()
+            st.rerun()
 
-models = sorted(df_raw['Model'].unique())
-sel_models = st.sidebar.multiselect("Setup / Model", models, default=models)
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+    else:
+        start_date, end_date = min_date, max_date
 
-setups = sorted(df_raw['Setup'].unique())
-sel_setups = st.sidebar.multiselect("Trade Type", setups, default=setups)
-
-sessions = sorted(df_raw['Session'].unique())
-sel_sessions = st.sidebar.multiselect("Session", sessions, default=sessions)
-
-actions = sorted(df_raw['Action'].unique())
-sel_actions = st.sidebar.multiselect("Action", actions, default=actions)
-
-wl_options = ['Won', 'Loss']
-sel_wl = st.sidebar.multiselect("Result", wl_options, default=wl_options)
-
-st.sidebar.markdown("---")
-st.sidebar.caption(f"Data cached for 5 min · refreshes automatically\n\nLast row in sheet: {max_date}")
-if st.sidebar.button("🔄 Force refresh now"):
-    st.cache_data.clear()
-    st.rerun()
+    fr1, fr2, fr3, fr4 = st.columns(4)
+    with fr1:
+        pairs = sorted(df_raw['Pair'].unique())
+        sel_pairs = st.multiselect("Currency Pair", pairs, default=pairs)
+        models = sorted(df_raw['Model'].unique())
+        sel_models = st.multiselect("Setup / Model", models, default=models)
+    with fr2:
+        setups = sorted(df_raw['Setup'].unique())
+        sel_setups = st.multiselect("Trade Type", setups, default=setups)
+        sessions = sorted(df_raw['Session'].unique())
+        sel_sessions = st.multiselect("Session", sessions, default=sessions)
+    with fr3:
+        actions = sorted(df_raw['Action'].unique())
+        sel_actions = st.multiselect("Action", actions, default=actions)
+        wl_options = ['Won', 'Loss']
+        sel_wl = st.multiselect("Result", wl_options, default=wl_options)
+    with fr4:
+        st.caption(f"Latest data point in sheet: **{max_date}**")
+        st.caption("Data auto-refreshes every 5 minutes.")
 
 mask = (
     (df_raw['Date'].dt.date >= start_date) &
@@ -191,23 +235,20 @@ mask = (
 df = df_raw[mask].copy()
 
 if df.empty:
-    st.warning("No trades match the current filters. Adjust filters in the sidebar.")
+    st.warning("No trades match the current filters. Adjust filters above.")
     st.stop()
 
-# Recompute equity curve / drawdown on the FILTERED set (sequence order preserved)
 df = df.sort_values('Date').reset_index(drop=True)
 df['Cum P&L'] = df['P&L'].fillna(0).cumsum()
 df['Running Max'] = df['Cum P&L'].cummax()
 df['Drawdown'] = df['Cum P&L'] - df['Running Max']
 
 # =========================================================
-# HEADER + TICKER
+# TICKER (slowed down)
 # =========================================================
-st.markdown("# 📈 FX Performance Terminal")
-
 ticker_items = ""
 for _, r in df.sort_values('Date', ascending=False).head(30).iterrows():
-    color = "#22c55e" if r['W/L'] == 'Won' else "#ef4444"
+    color = T['green'] if r['W/L'] == 'Won' else T['red']
     sign = "+" if (r['P&L'] or 0) >= 0 else ""
     pnl_txt = f"{sign}{r['P&L']:.2f}" if pd.notna(r['P&L']) else "—"
     ticker_items += (
@@ -236,7 +277,6 @@ max_dd = df['Drawdown'].min()
 daily_pnl = df.groupby(df['Date'].dt.date)['P&L'].sum()
 sharpe = (daily_pnl.mean() / daily_pnl.std() * np.sqrt(252)) if daily_pnl.std() not in (0, np.nan) else np.nan
 
-# current streak
 streak, streak_type = 0, None
 for w in df['Win'].iloc[::-1]:
     cur = 'W' if w == 1 else 'L'
@@ -248,18 +288,21 @@ for w in df['Win'].iloc[::-1]:
     else:
         break
 
+
 def fmt_money(x):
     if pd.isna(x):
-        return "—"
+        return "<span class='stat-value neutral'>—</span>"
     cls = "green" if x >= 0 else "red"
     sign = "+" if x >= 0 else ""
     return f"<span class='stat-value {cls}'>{sign}{x:,.2f}</span>"
+
 
 def stat_card(label, value_html):
     st.markdown(
         f"<div class='stat-card'><div class='stat-label'>{label}</div>{value_html}</div>",
         unsafe_allow_html=True,
     )
+
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
@@ -268,25 +311,30 @@ with c2:
     stat_card("Win Rate", f"<span class='stat-value neutral'>{win_rate:.1f}%</span>")
 with c3:
     stat_card("Total Trades", f"<span class='stat-value neutral'>{total_trades}</span> "
-                               f"<span style='color:#8b93a3;font-size:13px'>({wins}W / {losses}L)</span>")
+                               f"<span style='color:{T['text_secondary']};font-size:13px'>({wins}W / {losses}L)</span>")
 with c4:
-    stat_card("Avg R-Multiple", f"<span class='stat-value {'green' if (avg_rr or 0) >= 0 else 'red'}'>"
-                                 f"{avg_rr:.2f}R</span>" if pd.notna(avg_rr) else "<span class='stat-value neutral'>—</span>")
+    stat_card("Avg R-Multiple",
+              f"<span class='stat-value {'green' if (avg_rr or 0) >= 0 else 'red'}'>{avg_rr:.2f}R</span>"
+              if pd.notna(avg_rr) else "<span class='stat-value neutral'>—</span>")
 with c5:
-    stat_card("Profit Factor", f"<span class='stat-value neutral'>{profit_factor:.2f}</span>" if pd.notna(profit_factor) else "<span class='stat-value neutral'>—</span>")
+    stat_card("Profit Factor",
+              f"<span class='stat-value neutral'>{profit_factor:.2f}</span>" if pd.notna(profit_factor)
+              else "<span class='stat-value neutral'>—</span>")
 with c6:
     stat_card("Max Drawdown", f"<span class='stat-value red'>{max_dd:,.2f}</span>")
 
 c7, c8, c9 = st.columns(3)
 with c7:
-    stat_card("Sharpe (annualized)", f"<span class='stat-value neutral'>{sharpe:.2f}</span>" if pd.notna(sharpe) else "<span class='stat-value neutral'>—</span>")
+    stat_card("Sharpe (annualized)",
+              f"<span class='stat-value neutral'>{sharpe:.2f}</span>" if pd.notna(sharpe)
+              else "<span class='stat-value neutral'>—</span>")
 with c8:
     streak_color = "green" if streak_type == 'W' else "red"
     stat_card("Current Streak", f"<span class='stat-value {streak_color}'>{streak}{streak_type or ''}</span>")
 with c9:
-    stat_card("Avg Win / Avg Loss", f"<span class='stat-value neutral'>"
-              f"{df.loc[df['Win']==1,'P&L'].mean():.1f} / {df.loc[df['Win']==0,'P&L'].mean():.1f}</span>"
-              if wins and losses else "<span class='stat-value neutral'>—</span>")
+    avg_win_loss = (f"{df.loc[df['Win']==1,'P&L'].mean():.1f} / {df.loc[df['Win']==0,'P&L'].mean():.1f}"
+                     if wins and losses else "—")
+    stat_card("Avg Win / Avg Loss", f"<span class='stat-value neutral'>{avg_win_loss}</span>")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -300,15 +348,11 @@ with col_left:
     fig_eq = go.Figure()
     fig_eq.add_trace(go.Scatter(
         x=df['Date'], y=df['Cum P&L'], mode='lines',
-        line=dict(color='#22c55e', width=2),
-        fill='tozeroy', fillcolor='rgba(34,197,94,0.08)',
+        line=dict(color=T['green'], width=2),
+        fill='tozeroy', fillcolor='rgba(34,197,94,0.10)',
         name='Cumulative P&L'
     ))
-    fig_eq.update_layout(
-        template='plotly_dark', paper_bgcolor='#0a0e14', plot_bgcolor='#0a0e14',
-        height=340, margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title=None, yaxis_title="Cumulative P&L",
-    )
+    themed(fig_eq).update_layout(height=340, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="Cumulative P&L")
     st.plotly_chart(fig_eq, use_container_width=True)
 
 with col_right:
@@ -316,16 +360,116 @@ with col_right:
     fig_dd = go.Figure()
     fig_dd.add_trace(go.Scatter(
         x=df['Date'], y=df['Drawdown'], mode='lines',
-        line=dict(color='#ef4444', width=2),
+        line=dict(color=T['red'], width=2),
         fill='tozeroy', fillcolor='rgba(239,68,68,0.12)',
         name='Drawdown'
     ))
-    fig_dd.update_layout(
-        template='plotly_dark', paper_bgcolor='#0a0e14', plot_bgcolor='#0a0e14',
-        height=340, margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title=None, yaxis_title="Drawdown",
-    )
+    themed(fig_dd).update_layout(height=340, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="Drawdown")
     st.plotly_chart(fig_dd, use_container_width=True)
+
+# =========================================================
+# WEEK-WISE PERFORMANCE (P&L + trade count)
+# =========================================================
+st.markdown("### Week-wise Performance")
+
+week_order = df.groupby('WK')['Date'].min().sort_values().index.tolist()
+weekly = df.groupby('WK').agg(
+    Trades=('P&L', 'count'), Wins=('Win', 'sum'), PnL=('P&L', 'sum'),
+    WeekStart=('Date', 'min'), WeekEnd=('Date', 'max'),
+).reindex(week_order).reset_index()
+weekly['Win Rate %'] = (weekly['Wins'] / weekly['Trades'] * 100).round(1)
+
+fig_week = go.Figure()
+fig_week.add_trace(go.Bar(
+    x=weekly['WK'], y=weekly['PnL'], name='P&L',
+    marker_color=[T['green'] if v >= 0 else T['red'] for v in weekly['PnL']],
+    yaxis='y1',
+))
+fig_week.add_trace(go.Scatter(
+    x=weekly['WK'], y=weekly['Trades'], name='Trades',
+    mode='lines+markers', line=dict(color='#3b82f6', width=2),
+    yaxis='y2',
+))
+themed(fig_week).update_layout(
+    height=360, margin=dict(l=10, r=10, t=30, b=10),
+    yaxis=dict(title='P&L'),
+    yaxis2=dict(title='Trades', overlaying='y', side='right', showgrid=False),
+    legend=dict(orientation='h', y=1.1),
+)
+st.plotly_chart(fig_week, use_container_width=True)
+
+with st.expander("Week-wise data table"):
+    wk_table = weekly.copy()
+    wk_table['WeekStart'] = wk_table['WeekStart'].dt.strftime('%d %b %Y')
+    wk_table['WeekEnd'] = wk_table['WeekEnd'].dt.strftime('%d %b %Y')
+    st.dataframe(
+        wk_table[['WK', 'WeekStart', 'WeekEnd', 'Trades', 'Wins', 'Win Rate %', 'PnL']]
+        .rename(columns={'PnL': 'P&L'})
+        .style.format({'P&L': '{:,.2f}', 'Win Rate %': '{:.1f}'}),
+        use_container_width=True, hide_index=True,
+    )
+
+# =========================================================
+# CALENDAR VIEW — trades & P&L per day, with weekly & monthly subtotals
+# =========================================================
+st.markdown("### Calendar — Trades & P&L")
+
+daily = df.groupby(df['Date'].dt.normalize()).agg(
+    Trades=('P&L', 'count'), PnL=('P&L', 'sum')
+).reset_index().rename(columns={'Date': 'Day'})
+
+all_days = pd.date_range(df['Date'].min().normalize(), df['Date'].max().normalize(), freq='D')
+cal = pd.DataFrame({'Day': all_days}).merge(daily, on='Day', how='left')
+cal['Trades'] = cal['Trades'].fillna(0)
+cal['PnL'] = cal['PnL'].fillna(0)
+cal['Weekday'] = cal['Day'].dt.weekday
+cal['WeekStart'] = cal['Day'] - pd.to_timedelta(cal['Weekday'], unit='D')
+
+week_starts = sorted(cal['WeekStart'].unique())
+week_labels = [pd.Timestamp(w).strftime('%d %b') for w in week_starts]
+weekday_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+z = np.full((7, len(week_starts)), np.nan)
+text = np.full((7, len(week_starts)), '', dtype=object)
+for _, row in cal.iterrows():
+    col = week_starts.index(row['WeekStart'])
+    r = int(row['Weekday'])
+    if row['Trades'] > 0:
+        z[r, col] = row['PnL']
+        text[r, col] = f"{row['Day'].strftime('%d %b %Y')}<br>Trades: {int(row['Trades'])}<br>P&L: {row['PnL']:.2f}"
+    else:
+        text[r, col] = f"{row['Day'].strftime('%d %b %Y')}<br>No trades"
+
+max_abs = np.nanmax(np.abs(z)) if not np.all(np.isnan(z)) else 1
+fig_cal = go.Figure(go.Heatmap(
+    z=z, x=week_labels, y=weekday_labels, text=text, hoverinfo='text',
+    colorscale=[[0, T['red']], [0.5, T['card_bg']], [1, T['green']]],
+    zmin=-max_abs, zmax=max_abs, zmid=0,
+    xgap=3, ygap=3, showscale=True,
+))
+themed(fig_cal).update_layout(height=280, margin=dict(l=10, r=10, t=10, b=10))
+st.plotly_chart(fig_cal, use_container_width=True)
+
+cal_c1, cal_c2 = st.columns(2)
+with cal_c1:
+    with st.expander("Weekly subtotals"):
+        st.dataframe(
+            wk_table[['WK', 'WeekStart', 'WeekEnd', 'Trades', 'PnL']]
+            .rename(columns={'PnL': 'P&L'})
+            .style.format({'P&L': '{:,.2f}'}),
+            use_container_width=True, hide_index=True,
+        )
+with cal_c2:
+    with st.expander("Monthly subtotals"):
+        monthly_sub = df.groupby(df['Date'].dt.to_period('M')).agg(
+            Trades=('P&L', 'count'), PnL=('P&L', 'sum')
+        ).reset_index()
+        monthly_sub['Date'] = monthly_sub['Date'].astype(str)
+        st.dataframe(
+            monthly_sub.rename(columns={'Date': 'Month', 'PnL': 'P&L'})
+            .style.format({'P&L': '{:,.2f}'}),
+            use_container_width=True, hide_index=True,
+        )
 
 # =========================================================
 # R-MULTIPLE DISTRIBUTION + MONTHLY P&L
@@ -337,12 +481,9 @@ with col_left2:
     r_data = df['R Multiple'].dropna()
     if len(r_data):
         fig_r = px.histogram(r_data, nbins=30, color_discrete_sequence=['#3b82f6'])
-        fig_r.update_layout(
-            template='plotly_dark', paper_bgcolor='#0a0e14', plot_bgcolor='#0a0e14',
-            height=320, margin=dict(l=10, r=10, t=10, b=10),
-            showlegend=False, xaxis_title="R Multiple", yaxis_title="Trades",
-        )
-        fig_r.add_vline(x=0, line_dash="dash", line_color="#6b7280")
+        themed(fig_r).update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10),
+                                     showlegend=False, xaxis_title="R Multiple", yaxis_title="Trades")
+        fig_r.add_vline(x=0, line_dash="dash", line_color=T['text_secondary'])
         st.plotly_chart(fig_r, use_container_width=True)
     else:
         st.info("No R-multiple data available for the current filter selection.")
@@ -351,13 +492,9 @@ with col_right2:
     st.markdown("### Monthly P&L")
     monthly = df.groupby(df['Date'].dt.to_period('M'))['P&L'].sum()
     monthly.index = monthly.index.to_timestamp()
-    colors = ['#22c55e' if v >= 0 else '#ef4444' for v in monthly.values]
+    colors = [T['green'] if v >= 0 else T['red'] for v in monthly.values]
     fig_m = go.Figure(go.Bar(x=monthly.index, y=monthly.values, marker_color=colors))
-    fig_m.update_layout(
-        template='plotly_dark', paper_bgcolor='#0a0e14', plot_bgcolor='#0a0e14',
-        height=320, margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title=None, yaxis_title="P&L",
-    )
+    themed(fig_m).update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="P&L")
     st.plotly_chart(fig_m, use_container_width=True)
 
 # =========================================================
@@ -377,15 +514,11 @@ col_s1, col_s2 = st.columns([1.3, 1])
 with col_s1:
     fig_setup = go.Figure(go.Bar(
         x=setup_perf['Model'], y=setup_perf['Total_PnL'],
-        marker_color=['#22c55e' if v >= 0 else '#ef4444' for v in setup_perf['Total_PnL']],
+        marker_color=[T['green'] if v >= 0 else T['red'] for v in setup_perf['Total_PnL']],
         text=setup_perf['Win Rate %'].astype(str) + '% WR',
         textposition='outside',
     ))
-    fig_setup.update_layout(
-        template='plotly_dark', paper_bgcolor='#0a0e14', plot_bgcolor='#0a0e14',
-        height=320, margin=dict(l=10, r=10, t=30, b=10),
-        xaxis_title=None, yaxis_title="Total P&L",
-    )
+    themed(fig_setup).update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10), yaxis_title="Total P&L")
     st.plotly_chart(fig_setup, use_container_width=True)
 with col_s2:
     st.dataframe(
@@ -405,7 +538,8 @@ display_df['Date'] = display_df['Date'].dt.strftime('%d %b %Y')
 
 st.dataframe(
     display_df.style.format({'P&L': '{:,.2f}', 'R Multiple': '{:.2f}', 'RR': '{:.2f}', 'Pip': '{:.1f}'})
-    .map(lambda v: 'color: #22c55e' if v == 'Won' else ('color: #ef4444' if v == 'Loss' else ''), subset=['W/L']),
+    .map(lambda v: f"color: {T['green']}" if v == 'Won' else (f"color: {T['red']}" if v == 'Loss' else ''),
+         subset=['W/L']),
     use_container_width=True, hide_index=True, height=420,
 )
 

@@ -1,5 +1,7 @@
+import calendar as pycal
 import csv
 import io
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -17,67 +19,85 @@ APP_TITLE = "dpkFXdashboard"
 st.set_page_config(page_title=APP_TITLE, page_icon="📈", layout="wide")
 
 # =========================================================
-# THEME (custom light/dark toggle — overrides Streamlit's own
-# theme menu so the WHOLE app switches consistently, not just
-# native widgets)
+# THEME — TradeZella-style: dark navy + purple accent,
+# green/red P&L, clean geometric sans font
 # =========================================================
 THEMES = {
     "Dark": dict(
-        bg="#0a0e14", card_bg="#12161f", card_bg2="#0d1017", border="#1f2733",
-        text_primary="#e5e7eb", text_secondary="#8b93a3", ticker_bg="#0d1017",
-        green="#22c55e", red="#ef4444", neutral="#e5e7eb",
-        plotly_template="plotly_dark", plot_bg="#0a0e14",
+        bg="#0b0d17", card_bg="#141726", card_bg2="#10121f", border="#232640",
+        text_primary="#f1f2f6", text_secondary="#8b8fa3", ticker_bg="#10121f",
+        green="#17c68f", red="#ff4d67", purple="#8b5cf6", purple_soft="rgba(139,92,246,0.12)",
+        plotly_template="plotly_dark", plot_bg="#0b0d17",
     ),
     "Light": dict(
-        bg="#f5f6f8", card_bg="#ffffff", card_bg2="#ffffff", border="#e2e8f0",
-        text_primary="#111827", text_secondary="#6b7280", ticker_bg="#ffffff",
-        green="#16a34a", red="#dc2626", neutral="#111827",
+        bg="#f6f6fb", card_bg="#ffffff", card_bg2="#ffffff", border="#e6e6f2",
+        text_primary="#14141f", text_secondary="#6b6f83", ticker_bg="#ffffff",
+        green="#0ea672", red="#e5364f", purple="#7c5cfc", purple_soft="rgba(124,92,252,0.10)",
         plotly_template="plotly_white", plot_bg="#ffffff",
     ),
 }
 
 if "theme" not in st.session_state:
     st.session_state.theme = "Dark"
-
 T = THEMES[st.session_state.theme]
 
 st.markdown(f"""
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
     html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"],
     [data-testid="stToolbar"], .main, .block-container {{
         background-color: {T['bg']} !important;
         color: {T['text_primary']} !important;
+        font-family: 'Inter', sans-serif !important;
     }}
-    h1, h2, h3, h4, p, span, label, div {{ color: {T['text_primary']}; }}
-    h1, h2, h3 {{ font-family: 'Courier New', monospace; }}
-    .stat-card {{
+    h1, h2, h3, h4, p, span, label, div {{ color: {T['text_primary']}; font-family: 'Inter', sans-serif; }}
+    h1, h2, h3 {{ font-weight: 800; letter-spacing: -0.5px; }}
+
+    .kpi-card {{
         background: {T['card_bg']};
         border: 1px solid {T['border']};
-        border-radius: 10px;
+        border-radius: 14px;
         padding: 16px 18px;
-        text-align: left;
         margin-bottom: 10px;
     }}
-    .stat-label {{ color: {T['text_secondary']}; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }}
-    .stat-value {{ font-size: 26px; font-weight: 700; font-family: 'Courier New', monospace; }}
+    .kpi-label {{ color: {T['text_secondary']}; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }}
+    .kpi-value {{ font-size: 25px; font-weight: 800; }}
+    .kpi-sub {{ font-size: 12px; color: {T['text_secondary']}; margin-top: 2px; }}
     .green {{ color: {T['green']}; }}
     .red {{ color: {T['red']}; }}
-    .neutral {{ color: {T['neutral']}; }}
+    .purple {{ color: {T['purple']}; }}
+    .neutral {{ color: {T['text_primary']}; }}
+
     .ticker-wrap {{
         width: 100%; overflow: hidden; background: {T['ticker_bg']};
         border-top: 1px solid {T['border']}; border-bottom: 1px solid {T['border']};
-        padding: 8px 0; margin-bottom: 18px;
+        padding: 10px 0; margin-bottom: 20px; border-radius: 10px;
     }}
     .ticker-move {{
         display: inline-block; white-space: nowrap;
         animation: ticker 140s linear infinite;
-        font-family: 'Courier New', monospace; font-size: 14px;
+        font-size: 13px; font-weight: 500;
     }}
     .ticker-wrap:hover .ticker-move {{ animation-play-state: paused; }}
     @keyframes ticker {{ 0% {{ transform: translateX(0); }} 100% {{ transform: translateX(-50%); }} }}
     .ticker-item {{ display: inline-block; padding: 0 24px; }}
-    div[data-testid="stDataFrame"] {{ border: 1px solid {T['border']}; border-radius: 8px; }}
-    div[data-testid="stExpander"] {{ background: {T['card_bg']}; border: 1px solid {T['border']}; border-radius: 10px; }}
+
+    div[data-testid="stDataFrame"] {{ border: 1px solid {T['border']}; border-radius: 12px; }}
+    div[data-testid="stExpander"] {{ background: {T['card_bg']}; border: 1px solid {T['border']}; border-radius: 14px; }}
+    .stButton>button {{
+        background: {T['purple']} !important; color: white !important; border: none !important;
+        border-radius: 8px !important; font-weight: 600 !important;
+    }}
+
+    .cal-wrap {{ background: {T['card_bg']}; border: 1px solid {T['border']}; border-radius: 14px; padding: 14px; }}
+    .cal-grid {{ display: grid; grid-template-columns: repeat(7, 1fr) 100px; gap: 6px; }}
+    .cal-head {{ color: {T['text_secondary']}; font-size: 11px; font-weight: 700; text-transform: uppercase; text-align: center; padding: 4px 0; }}
+    .cal-cell {{ border-radius: 8px; padding: 6px 8px; min-height: 64px; font-size: 11px; border: 1px solid transparent; }}
+    .cal-cell .d {{ font-size: 11px; opacity: 0.6; }}
+    .cal-cell .pnl {{ font-size: 14px; font-weight: 800; margin-top: 4px; }}
+    .cal-cell .cnt {{ font-size: 10.5px; opacity: 0.75; margin-top: 2px; }}
+    .cal-empty {{ background: transparent; }}
+    .cal-week-total {{ background: {T['purple_soft']}; border-radius: 8px; padding: 6px 8px; min-height: 64px; font-size: 11px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,7 +106,7 @@ def themed(fig):
     fig.update_layout(
         template=T['plotly_template'],
         paper_bgcolor=T['plot_bg'], plot_bgcolor=T['plot_bg'],
-        font=dict(color=T['text_primary']),
+        font=dict(color=T['text_primary'], family='Inter'),
     )
     return fig
 
@@ -169,7 +189,7 @@ if df_raw.empty:
     st.stop()
 
 # =========================================================
-# HEADER (title + theme toggle)
+# HEADER
 # =========================================================
 h1, h2 = st.columns([5, 1])
 with h1:
@@ -183,7 +203,7 @@ with h2:
         st.rerun()
 
 # =========================================================
-# FILTERS — now inline in the dashboard, not the sidebar
+# FILTERS
 # =========================================================
 with st.expander("⚙️ Filters", expanded=True):
     min_date, max_date = df_raw['Date'].min().date(), df_raw['Date'].max().date()
@@ -244,7 +264,7 @@ df['Running Max'] = df['Cum P&L'].cummax()
 df['Drawdown'] = df['Cum P&L'] - df['Running Max']
 
 # =========================================================
-# TICKER (slowed down)
+# TICKER
 # =========================================================
 ticker_items = ""
 for _, r in df.sort_values('Date', ascending=False).head(30).iterrows():
@@ -274,8 +294,10 @@ gross_profit = df.loc[df['P&L'] > 0, 'P&L'].sum()
 gross_loss = abs(df.loc[df['P&L'] < 0, 'P&L'].sum())
 profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else np.nan
 max_dd = df['Drawdown'].min()
-daily_pnl = df.groupby(df['Date'].dt.date)['P&L'].sum()
-sharpe = (daily_pnl.mean() / daily_pnl.std() * np.sqrt(252)) if daily_pnl.std() not in (0, np.nan) else np.nan
+
+daily_pnl_series = df.groupby(df['Date'].dt.date)['P&L'].sum()
+sharpe = (daily_pnl_series.mean() / daily_pnl_series.std() * np.sqrt(252)) if daily_pnl_series.std() not in (0, np.nan) else np.nan
+day_win_rate = (daily_pnl_series > 0).mean() * 100 if len(daily_pnl_series) else np.nan
 
 streak, streak_type = 0, None
 for w in df['Win'].iloc[::-1]:
@@ -291,69 +313,85 @@ for w in df['Win'].iloc[::-1]:
 
 def fmt_money(x):
     if pd.isna(x):
-        return "<span class='stat-value neutral'>—</span>"
+        return "<span class='kpi-value neutral'>—</span>"
     cls = "green" if x >= 0 else "red"
     sign = "+" if x >= 0 else ""
-    return f"<span class='stat-value {cls}'>{sign}{x:,.2f}</span>"
+    return f"<span class='kpi-value {cls}'>{sign}{x:,.2f}</span>"
 
 
-def stat_card(label, value_html):
+def kpi_card(label, value_html, sub=""):
+    sub_html = f"<div class='kpi-sub'>{sub}</div>" if sub else ""
     st.markdown(
-        f"<div class='stat-card'><div class='stat-label'>{label}</div>{value_html}</div>",
+        f"<div class='kpi-card'><div class='kpi-label'>{label}</div>{value_html}{sub_html}</div>",
         unsafe_allow_html=True,
     )
 
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1:
-    stat_card("Total P&L", fmt_money(total_pnl))
+    kpi_card("Net P&L", fmt_money(total_pnl))
 with c2:
-    stat_card("Win Rate", f"<span class='stat-value neutral'>{win_rate:.1f}%</span>")
+    kpi_card("Win Rate", f"<span class='kpi-value purple'>{win_rate:.1f}%</span>", f"{wins}W / {losses}L")
 with c3:
-    stat_card("Total Trades", f"<span class='stat-value neutral'>{total_trades}</span> "
-                               f"<span style='color:{T['text_secondary']};font-size:13px'>({wins}W / {losses}L)</span>")
+    kpi_card("Profit Factor",
+              f"<span class='kpi-value neutral'>{profit_factor:.2f}</span>" if pd.notna(profit_factor)
+              else "<span class='kpi-value neutral'>—</span>")
 with c4:
-    stat_card("Avg R-Multiple",
-              f"<span class='stat-value {'green' if (avg_rr or 0) >= 0 else 'red'}'>{avg_rr:.2f}R</span>"
-              if pd.notna(avg_rr) else "<span class='stat-value neutral'>—</span>")
+    kpi_card("Day Win %",
+              f"<span class='kpi-value neutral'>{day_win_rate:.1f}%</span>" if pd.notna(day_win_rate)
+              else "<span class='kpi-value neutral'>—</span>", f"{len(daily_pnl_series)} trading days")
 with c5:
-    stat_card("Profit Factor",
-              f"<span class='stat-value neutral'>{profit_factor:.2f}</span>" if pd.notna(profit_factor)
-              else "<span class='stat-value neutral'>—</span>")
+    avg_win_loss = (f"{df.loc[df['Win']==1,'P&L'].mean():.1f} / {df.loc[df['Win']==0,'P&L'].mean():.1f}"
+                     if wins and losses else "—")
+    kpi_card("Avg Win / Avg Loss", f"<span class='kpi-value neutral'>{avg_win_loss}</span>")
 with c6:
-    stat_card("Max Drawdown", f"<span class='stat-value red'>{max_dd:,.2f}</span>")
+    kpi_card("Max Drawdown", f"<span class='kpi-value red'>{max_dd:,.2f}</span>")
 
 c7, c8, c9 = st.columns(3)
 with c7:
-    stat_card("Sharpe (annualized)",
-              f"<span class='stat-value neutral'>{sharpe:.2f}</span>" if pd.notna(sharpe)
-              else "<span class='stat-value neutral'>—</span>")
+    kpi_card("Avg R-Multiple",
+              f"<span class='kpi-value {'green' if (avg_rr or 0) >= 0 else 'red'}'>{avg_rr:.2f}R</span>"
+              if pd.notna(avg_rr) else "<span class='kpi-value neutral'>—</span>")
 with c8:
-    streak_color = "green" if streak_type == 'W' else "red"
-    stat_card("Current Streak", f"<span class='stat-value {streak_color}'>{streak}{streak_type or ''}</span>")
+    kpi_card("Sharpe (annualized)",
+              f"<span class='kpi-value neutral'>{sharpe:.2f}</span>" if pd.notna(sharpe)
+              else "<span class='kpi-value neutral'>—</span>")
 with c9:
-    avg_win_loss = (f"{df.loc[df['Win']==1,'P&L'].mean():.1f} / {df.loc[df['Win']==0,'P&L'].mean():.1f}"
-                     if wins and losses else "—")
-    stat_card("Avg Win / Avg Loss", f"<span class='stat-value neutral'>{avg_win_loss}</span>")
+    streak_color = "green" if streak_type == 'W' else "red"
+    kpi_card("Current Streak", f"<span class='kpi-value {streak_color}'>{streak}{streak_type or ''}</span>")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # =========================================================
-# EQUITY CURVE + DRAWDOWN
+# BIG EQUITY CURVE (purple/green gradient, TradeZella-style hero chart)
 # =========================================================
-col_left, col_right = st.columns(2)
+st.markdown("### Net Cumulative P&L")
+fig_eq = go.Figure()
+fig_eq.add_trace(go.Scatter(
+    x=df['Date'], y=df['Cum P&L'], mode='lines',
+    line=dict(color=T['purple'], width=3),
+    fill='tozeroy', fillcolor='rgba(139,92,246,0.14)',
+    name='Cumulative P&L'
+))
+themed(fig_eq).update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="Cumulative P&L")
+st.plotly_chart(fig_eq, use_container_width=True)
+
+# =========================================================
+# WIN RATE DONUT + DRAWDOWN
+# =========================================================
+col_left, col_right = st.columns([1, 2])
 
 with col_left:
-    st.markdown("### Equity Curve")
-    fig_eq = go.Figure()
-    fig_eq.add_trace(go.Scatter(
-        x=df['Date'], y=df['Cum P&L'], mode='lines',
-        line=dict(color=T['green'], width=2),
-        fill='tozeroy', fillcolor='rgba(34,197,94,0.10)',
-        name='Cumulative P&L'
+    st.markdown("### Win Rate")
+    fig_donut = go.Figure(go.Pie(
+        values=[wins, losses], labels=['Wins', 'Losses'], hole=0.72,
+        marker_colors=[T['green'], T['red']], textinfo='none', sort=False,
     ))
-    themed(fig_eq).update_layout(height=340, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="Cumulative P&L")
-    st.plotly_chart(fig_eq, use_container_width=True)
+    fig_donut.add_annotation(text=f"<b>{win_rate:.1f}%</b><br><span style='font-size:11px'>Win Rate</span>",
+                              showarrow=False, font=dict(size=20, color=T['text_primary']))
+    themed(fig_donut).update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10), showlegend=True,
+                                     legend=dict(orientation='h', y=-0.1))
+    st.plotly_chart(fig_donut, use_container_width=True)
 
 with col_right:
     st.markdown("### Drawdown")
@@ -361,14 +399,14 @@ with col_right:
     fig_dd.add_trace(go.Scatter(
         x=df['Date'], y=df['Drawdown'], mode='lines',
         line=dict(color=T['red'], width=2),
-        fill='tozeroy', fillcolor='rgba(239,68,68,0.12)',
+        fill='tozeroy', fillcolor='rgba(255,77,103,0.12)',
         name='Drawdown'
     ))
-    themed(fig_dd).update_layout(height=340, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="Drawdown")
+    themed(fig_dd).update_layout(height=300, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="Drawdown")
     st.plotly_chart(fig_dd, use_container_width=True)
 
 # =========================================================
-# WEEK-WISE PERFORMANCE (P&L + trade count)
+# WEEK-WISE PERFORMANCE
 # =========================================================
 st.markdown("### Week-wise Performance")
 
@@ -387,11 +425,11 @@ fig_week.add_trace(go.Bar(
 ))
 fig_week.add_trace(go.Scatter(
     x=weekly['WK'], y=weekly['Trades'], name='Trades',
-    mode='lines+markers', line=dict(color='#3b82f6', width=2),
+    mode='lines+markers', line=dict(color=T['purple'], width=2),
     yaxis='y2',
 ))
 themed(fig_week).update_layout(
-    height=360, margin=dict(l=10, r=10, t=30, b=10),
+    height=340, margin=dict(l=10, r=10, t=30, b=10),
     yaxis=dict(title='P&L'),
     yaxis2=dict(title='Trades', overlaying='y', side='right', showgrid=False),
     legend=dict(orientation='h', y=1.1),
@@ -410,66 +448,96 @@ with st.expander("Week-wise data table"):
     )
 
 # =========================================================
-# CALENDAR VIEW — trades & P&L per day, with weekly & monthly subtotals
+# CALENDAR — real month-grid view (TradeZella style)
 # =========================================================
-st.markdown("### Calendar — Trades & P&L")
+st.markdown("### Calendar")
 
 daily = df.groupby(df['Date'].dt.normalize()).agg(
     Trades=('P&L', 'count'), PnL=('P&L', 'sum')
 ).reset_index().rename(columns={'Date': 'Day'})
+daily_map = {row['Day'].date(): (row['Trades'], row['PnL']) for _, row in daily.iterrows()}
 
-all_days = pd.date_range(df['Date'].min().normalize(), df['Date'].max().normalize(), freq='D')
-cal = pd.DataFrame({'Day': all_days}).merge(daily, on='Day', how='left')
-cal['Trades'] = cal['Trades'].fillna(0)
-cal['PnL'] = cal['PnL'].fillna(0)
-cal['Weekday'] = cal['Day'].dt.weekday
-cal['WeekStart'] = cal['Day'] - pd.to_timedelta(cal['Weekday'], unit='D')
+available_months = sorted(df['Date'].dt.to_period('M').unique())
+month_labels = [m.strftime('%B %Y') for m in available_months]
 
-week_starts = sorted(cal['WeekStart'].unique())
-week_labels = [pd.Timestamp(w).strftime('%d %b') for w in week_starts]
-weekday_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+if "cal_month_idx" not in st.session_state or st.session_state.cal_month_idx >= len(available_months):
+    st.session_state.cal_month_idx = len(available_months) - 1
 
-z = np.full((7, len(week_starts)), np.nan)
-text = np.full((7, len(week_starts)), '', dtype=object)
-for _, row in cal.iterrows():
-    col = week_starts.index(row['WeekStart'])
-    r = int(row['Weekday'])
-    if row['Trades'] > 0:
-        z[r, col] = row['PnL']
-        text[r, col] = f"{row['Day'].strftime('%d %b %Y')}<br>Trades: {int(row['Trades'])}<br>P&L: {row['PnL']:.2f}"
+nav1, nav2, nav3 = st.columns([1, 3, 1])
+with nav1:
+    if st.button("◀ Prev") and st.session_state.cal_month_idx > 0:
+        st.session_state.cal_month_idx -= 1
+        st.rerun()
+with nav3:
+    if st.button("Next ▶") and st.session_state.cal_month_idx < len(available_months) - 1:
+        st.session_state.cal_month_idx += 1
+        st.rerun()
+with nav2:
+    st.markdown(f"<h4 style='text-align:center'>{month_labels[st.session_state.cal_month_idx]}</h4>",
+                unsafe_allow_html=True)
+
+sel_period = available_months[st.session_state.cal_month_idx]
+year, month = sel_period.year, sel_period.month
+
+cal_obj = pycal.Calendar(firstweekday=6)  # Sunday-first, like TradeZella
+month_weeks = cal_obj.monthdatescalendar(year, month)
+
+max_abs_day = max([abs(v[1]) for v in daily_map.values()] + [1])
+
+
+def cell_style(pnl):
+    if pnl is None:
+        return f"background: transparent; border: 1px solid {T['border']};"
+    intensity = min(abs(pnl) / max_abs_day, 1) * 0.35 + 0.08
+    if pnl >= 0:
+        return f"background: rgba(23,198,143,{intensity}); border: 1px solid {T['green']};"
+    return f"background: rgba(255,77,103,{intensity}); border: 1px solid {T['red']};"
+
+
+html = "<div class='cal-wrap'><div class='cal-grid'>"
+for wd in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']:
+    html += f"<div class='cal-head'>{wd}</div>"
+html += "<div class='cal-head'>Week</div>"
+
+for week in month_weeks:
+    week_pnl, week_trades = 0.0, 0
+    for d in week:
+        if d.month != month:
+            html += "<div class='cal-cell cal-empty'></div>"
+            continue
+        trades, pnl = daily_map.get(d, (0, None))
+        if trades and trades > 0:
+            week_pnl += pnl
+            week_trades += trades
+            color_cls = 'green' if pnl >= 0 else 'red'
+            html += (f"<div class='cal-cell' style='{cell_style(pnl)}'>"
+                      f"<div class='d'>{d.day}</div>"
+                      f"<div class='pnl {color_cls}'>{pnl:+.0f}</div>"
+                      f"<div class='cnt'>{int(trades)} trade{'s' if trades != 1 else ''}</div></div>")
+        else:
+            html += (f"<div class='cal-cell' style='{cell_style(None)}'>"
+                      f"<div class='d'>{d.day}</div></div>")
+    wk_color_cls = 'green' if week_pnl >= 0 else 'red'
+    if week_trades:
+        html += (f"<div class='cal-week-total'><div class='d'>Total</div>"
+                  f"<div class='pnl {wk_color_cls}'>{week_pnl:+.0f}</div>"
+                  f"<div class='cnt'>{week_trades} trades</div></div>")
     else:
-        text[r, col] = f"{row['Day'].strftime('%d %b %Y')}<br>No trades"
+        html += "<div class='cal-week-total'></div>"
 
-max_abs = np.nanmax(np.abs(z)) if not np.all(np.isnan(z)) else 1
-fig_cal = go.Figure(go.Heatmap(
-    z=z, x=week_labels, y=weekday_labels, text=text, hoverinfo='text',
-    colorscale=[[0, T['red']], [0.5, T['card_bg']], [1, T['green']]],
-    zmin=-max_abs, zmax=max_abs, zmid=0,
-    xgap=3, ygap=3, showscale=True,
-))
-themed(fig_cal).update_layout(height=280, margin=dict(l=10, r=10, t=10, b=10))
-st.plotly_chart(fig_cal, use_container_width=True)
+html += "</div></div>"
+st.markdown(html, unsafe_allow_html=True)
 
-cal_c1, cal_c2 = st.columns(2)
-with cal_c1:
-    with st.expander("Weekly subtotals"):
-        st.dataframe(
-            wk_table[['WK', 'WeekStart', 'WeekEnd', 'Trades', 'PnL']]
-            .rename(columns={'PnL': 'P&L'})
-            .style.format({'P&L': '{:,.2f}'}),
-            use_container_width=True, hide_index=True,
-        )
-with cal_c2:
-    with st.expander("Monthly subtotals"):
-        monthly_sub = df.groupby(df['Date'].dt.to_period('M')).agg(
-            Trades=('P&L', 'count'), PnL=('P&L', 'sum')
-        ).reset_index()
-        monthly_sub['Date'] = monthly_sub['Date'].astype(str)
-        st.dataframe(
-            monthly_sub.rename(columns={'Date': 'Month', 'PnL': 'P&L'})
-            .style.format({'P&L': '{:,.2f}'}),
-            use_container_width=True, hide_index=True,
-        )
+with st.expander("Monthly subtotals (all months in filter)"):
+    monthly_sub = df.groupby(df['Date'].dt.to_period('M')).agg(
+        Trades=('P&L', 'count'), PnL=('P&L', 'sum')
+    ).reset_index()
+    monthly_sub['Date'] = monthly_sub['Date'].astype(str)
+    st.dataframe(
+        monthly_sub.rename(columns={'Date': 'Month', 'PnL': 'P&L'})
+        .style.format({'P&L': '{:,.2f}'}),
+        use_container_width=True, hide_index=True,
+    )
 
 # =========================================================
 # R-MULTIPLE DISTRIBUTION + MONTHLY P&L
@@ -480,7 +548,7 @@ with col_left2:
     st.markdown("### R-Multiple Distribution")
     r_data = df['R Multiple'].dropna()
     if len(r_data):
-        fig_r = px.histogram(r_data, nbins=30, color_discrete_sequence=['#3b82f6'])
+        fig_r = px.histogram(r_data, nbins=30, color_discrete_sequence=[T['purple']])
         themed(fig_r).update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10),
                                      showlegend=False, xaxis_title="R Multiple", yaxis_title="Trades")
         fig_r.add_vline(x=0, line_dash="dash", line_color=T['text_secondary'])
